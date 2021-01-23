@@ -257,7 +257,7 @@ export class NotebookTextModel extends Disposable implements INotebookTextModel 
 		super();
 		this.transientOptions = options;
 		this.metadata = metadata;
-		this.updateLanguages(languages);
+		this.updateLanguages(metadata.languages && metadata.languages.length ? metadata.languages : languages);
 		this._initialize(cells);
 
 		this._eventEmitter = new DelayedEmitter(
@@ -275,7 +275,7 @@ export class NotebookTextModel extends Disposable implements INotebookTextModel 
 
 		const mainCells = cells.map(cell => {
 			const cellHandle = this._cellhandlePool++;
-			const cellUri = CellUri.generate(this.uri, cellHandle);
+			const cellUri = CellUri.generate(this.uri, this.viewType, cellHandle);
 			return new NotebookCellTextModel(cellUri, cellHandle, cell.source, cell.language, cell.cellKind, cell.outputs || [], cell.metadata, this.transientOptions, this._modelService);
 		});
 
@@ -337,14 +337,14 @@ export class NotebookTextModel extends Disposable implements INotebookTextModel 
 					this._replaceCells(edit.index, edit.count, edit.cells, synchronous, computeUndoRedo);
 					break;
 				case CellEditType.Output:
-					//TODO@joh,@rebornix no event, no undo stop (?)
+					//TODO@jrieken,@rebornix no event, no undo stop (?)
 					this._assertIndex(edit.index);
 					const cell = this._cells[edit.index];
 					this._spliceNotebookCellOutputs2(cell.handle, edit.outputs, computeUndoRedo);
 					break;
 				case CellEditType.OutputsSplice:
 					{
-						//TODO@joh,@rebornix no event, no undo stop (?)
+						//TODO@jrieken,@rebornix no event, no undo stop (?)
 						this._assertIndex(edit.index);
 						const cell = this._cells[edit.index];
 						this._spliceNotebookCellOutputs(cell.handle, edit.splices, computeUndoRedo);
@@ -425,7 +425,7 @@ export class NotebookTextModel extends Disposable implements INotebookTextModel 
 		// prepare add
 		const cells = cellDtos.map(cellDto => {
 			const cellHandle = this._cellhandlePool++;
-			const cellUri = CellUri.generate(this.uri, cellHandle);
+			const cellUri = CellUri.generate(this.uri, this.viewType, cellHandle);
 			const cell = new NotebookCellTextModel(
 				cellUri, cellHandle,
 				cellDto.source, cellDto.language, cellDto.cellKind, cellDto.outputs || [], cellDto.metadata, this.transientOptions,
@@ -483,9 +483,24 @@ export class NotebookTextModel extends Disposable implements INotebookTextModel 
 		}
 	}
 
+	private _isDocumentMetadataChangeTransient(a: NotebookDocumentMetadata, b: NotebookDocumentMetadata) {
+		const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+		for (let key of keys) {
+			if (key !== 'trusted') {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private _updateNotebookMetadata(metadata: NotebookDocumentMetadata, computeUndoRedo: boolean) {
 		const oldMetadata = this.metadata;
 		this.metadata = metadata;
+
+		if (this.metadata.languages && this.metadata.languages.length) {
+			this.updateLanguages(this.metadata.languages);
+		}
 
 		if (computeUndoRedo) {
 			const that = this;
@@ -504,7 +519,7 @@ export class NotebookTextModel extends Disposable implements INotebookTextModel 
 			}(), undefined, undefined);
 		}
 
-		this._eventEmitter.emit({ kind: NotebookCellsChangeType.ChangeDocumentMetadata, metadata: this.metadata, transient: false }, true);
+		this._eventEmitter.emit({ kind: NotebookCellsChangeType.ChangeDocumentMetadata, metadata: this.metadata, transient: this._isDocumentMetadataChangeTransient(oldMetadata, metadata) }, true);
 	}
 
 	private _insertNewCell(index: number, cells: NotebookCellTextModel[], synchronous: boolean, endSelections?: number[]): void {
